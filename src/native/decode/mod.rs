@@ -241,6 +241,23 @@ pub struct DecodeOptions {
     /// column, far below the ceiling; lower the limit only for
     /// memory-constrained bindings.
     pub max_synthetic_allocation_bytes: usize,
+    /// Timezone to report for `DateTime` and `DateTime64` columns whose type
+    /// carries none, for example the client's ambient timezone (server or
+    /// session timezone) that ClickHouse applies to a bare `DateTime`.
+    ///
+    /// When set, every decoded block's schema reports
+    /// `DateTime { timezone: Some(tz) }` instead of `None` for such columns,
+    /// including inside `Nullable`, `LowCardinality`, `Array`, `Tuple`, `Map`,
+    /// `Nested`, `SimpleAggregateFunction`, and `JSON` typed paths, so the
+    /// timezone also reaches the Arrow export (`DateTime64(3)` -> `tsm:<tz>`).
+    /// Explicit timezones from the wire always win. `Variant` alternatives and
+    /// `Dynamic` runtime types keep the wire type, because their order is
+    /// derived from canonical type names.
+    ///
+    /// Metadata only: the decoded values are identical with or without it. The
+    /// string is not validated as an IANA name; the binding owns that. The
+    /// default is `None`, which reflects the wire type string unchanged.
+    pub default_timezone: Option<String>,
 }
 
 impl Default for DecodeOptions {
@@ -248,6 +265,7 @@ impl Default for DecodeOptions {
         Self {
             protocol_revision: 0,
             max_synthetic_allocation_bytes: 256 * 1024 * 1024,
+            default_timezone: None,
         }
     }
 }
@@ -285,26 +303,27 @@ impl AllocationBudget {
 }
 
 #[derive(Clone, Copy)]
-struct DecodeSettings {
+struct DecodeSettings<'a> {
     protocol_revision: u64,
     types_in_binary_format: bool,
     max_synthetic_allocation_bytes: usize,
+    default_timezone: Option<&'a str>,
 }
 
-impl DecodeSettings {
-    fn text(options: &DecodeOptions) -> Self {
+impl<'a> DecodeSettings<'a> {
+    fn text(options: &'a DecodeOptions) -> Self {
         Self {
             protocol_revision: options.protocol_revision,
             types_in_binary_format: false,
             max_synthetic_allocation_bytes: options.max_synthetic_allocation_bytes,
+            default_timezone: options.default_timezone.as_deref(),
         }
     }
 
-    fn binary(options: &DecodeOptions) -> Self {
+    fn binary(options: &'a DecodeOptions) -> Self {
         Self {
-            protocol_revision: options.protocol_revision,
             types_in_binary_format: true,
-            max_synthetic_allocation_bytes: options.max_synthetic_allocation_bytes,
+            ..Self::text(options)
         }
     }
 }
@@ -3324,7 +3343,7 @@ fn decode_block_body(
     let mut columns = Vec::with_capacity(col_capacity);
 
     for _ in 0..num_cols {
-        let (col_name, ch_type) = read_column_header(reader, options)?;
+        let (col_name, mut ch_type) = read_column_header(reader, options)?;
 
         if num_rows == 0 {
             columns.push(empty_column(&ch_type));
@@ -3353,6 +3372,12 @@ fn decode_block_body(
                 options,
                 &mut allocation_budget,
             )?);
+        }
+
+        // Relabel only after the column is decoded, so the default timezone can
+        // never influence how the wire bytes are read. It is metadata only.
+        if let Some(tz) = options.default_timezone {
+            ch_type.apply_default_timezone(tz);
         }
 
         fields.push(Field {

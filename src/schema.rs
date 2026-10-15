@@ -886,6 +886,52 @@ fn escape_enum_name(name: &str) -> String {
 }
 
 impl ChType {
+    /// Fill in `tz` for every `DateTime` and `DateTime64` in this type tree that
+    /// carries no explicit timezone. Explicit timezones are left untouched.
+    ///
+    /// This is metadata only: the stored epoch seconds or ticks never change.
+    /// It recurses through `Nullable`, `LowCardinality`, `Array`, `Tuple`,
+    /// `Map`, `Nested`, `SimpleAggregateFunction`, and `JSON` typed paths.
+    ///
+    /// `Variant` alternatives are deliberately skipped. Their order is the sort
+    /// order of their canonical type names, so relabeling one could make the
+    /// rendered type reparse into a different alternative order, or collide
+    /// with an alternative that already names `tz`. `AggregateFunction`
+    /// arguments are skipped because they describe an opaque state, not values.
+    pub(crate) fn apply_default_timezone(&mut self, tz: &str) {
+        match self {
+            ChType::DateTime { timezone } | ChType::DateTime64 { timezone, .. } => {
+                if timezone.is_none() {
+                    *timezone = Some(tz.to_string());
+                }
+            }
+            ChType::Nullable(inner)
+            | ChType::LowCardinality(inner)
+            | ChType::Array(inner)
+            | ChType::SimpleAggregateFunction { inner, .. } => inner.apply_default_timezone(tz),
+            ChType::Map(key, value) => {
+                key.apply_default_timezone(tz);
+                value.apply_default_timezone(tz);
+            }
+            ChType::Tuple(elements) => {
+                for (_, element) in elements {
+                    element.apply_default_timezone(tz);
+                }
+            }
+            ChType::Nested(elements) => {
+                for (_, element) in elements {
+                    element.apply_default_timezone(tz);
+                }
+            }
+            ChType::Json { typed_paths, .. } => {
+                for (_, path_type) in typed_paths {
+                    path_type.apply_default_timezone(tz);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Whether this type is nullable (wrapped in Nullable).
     pub fn is_nullable(&self) -> bool {
         matches!(self, ChType::Nullable(_))

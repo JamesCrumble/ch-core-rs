@@ -7,6 +7,14 @@ version; patch releases remain backward compatible.
 
 ## Unreleased
 
+- Add `DecodeOptions::default_timezone`. When set, decoded schemas report it
+  for every `DateTime` and `DateTime64` without an explicit timezone, so a
+  binding can pass the client's ambient timezone (server or session timezone)
+  and reuse its explicit-timezone path, and `DateTime64` exports as a
+  timezone-aware Arrow timestamp. Explicit wire timezones win, `Variant`
+  alternatives and `Dynamic` runtime types keep the wire type, and values are
+  unchanged. Defaults to `None`, so existing behavior is preserved.
+
 ## v0.2.0, 2026-09-01
 
 - Add standalone `MultiPoint` decode, encode, and Arrow export for ClickHouse
