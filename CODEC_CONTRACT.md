@@ -1103,6 +1103,21 @@ the server may drop the timezone and emit a bare `DateTime`, while at revision
 54485 it emits `DateTime('<tz>')`. The decoder trusts and reflects whatever type
 string the server actually wrote.
 
+**Default timezone.** `DecodeOptions::default_timezone` (default `None`) lets a
+binding supply the timezone ClickHouse applies to a bare `DateTime` or
+`DateTime64`, for example the server timezone, the `session_timezone` setting,
+or the client's ambient timezone. When set, each decoded block's schema reports
+`timezone: Some(tz)` for every such type without an explicit timezone, after the
+column is decoded, so it can never change how bytes are read. It recurses
+through `Nullable`, `LowCardinality`, `Array`, `Tuple`, `Map`, `Nested`,
+`SimpleAggregateFunction`, and `JSON` typed paths, and so reaches the Arrow
+export (`DateTime64(3)` -> `tsm:<tz>`). An explicit wire timezone always wins.
+`Variant` alternatives and `Dynamic` runtime types are left as the wire wrote
+them, because their order is the sort order of canonical type names and a
+relabel could reorder or collide on reparse. `AggregateFunction` arguments are
+also untouched. The stored integers are identical with or without the option,
+and the string is not validated as an IANA zone name.
+
 `Time` and `Time64` always export their raw signed integer buffers because of
 the Arrow Time domain mismatch described above. Their precision and type
 identity remain available in `ChType`, and neither type carries timezone

@@ -244,7 +244,7 @@ The core stops at typed buffers plus ClickHouse logical type metadata. The bindi
 - Transport, decompression, streaming, cancellation, retries, and backpressure.
 - Public client API shape.
 - Host scalar mapping, for example `UInt64` as Python `int` or JavaScript `BigInt`.
-- Temporal presentation, for example how to apply a `DateTime` timezone or whether `DateTime64` becomes a host datetime object.
+- Temporal presentation, for example how to apply a `DateTime` timezone or whether `DateTime64` becomes a host datetime object. Resolving the ambient timezone for a bare `DateTime` (server timezone, session timezone, local timezone) is also the binding's call; pass the result as `DecodeOptions::default_timezone` and the decoded schema carries it like an explicit wire timezone.
 - Null representation, for example `None`, `null`, optional values, masked arrays, or Arrow validity.
 - Row vs column result shaping.
 - Future type policy as the core grows.
